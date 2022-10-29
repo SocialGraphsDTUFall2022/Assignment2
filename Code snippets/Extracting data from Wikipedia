@@ -1,0 +1,73 @@
+import matplotlib.pyplot as plt
+import random
+import numpy as np
+import pandas as pd
+import networkx as nx
+import urllib
+import re
+import os.path
+
+
+
+### Downloading .csv files
+
+dc = pd.read_csv('location/dc.csv', index_col=0)
+marvel = pd.read_csv('location/marvel.csv', index_col=0)
+
+
+### Putting underscores
+
+dc.loc[:,"WikiLink_parsing"]=dc.loc[:,"WikiLink"].astype(str)
+for i in dc.loc[:,"WikiLink_parsing"]:
+    dc["WikiLink_parsing"] = dc["WikiLink_parsing"].replace([i],re.sub(' ', '_', i))
+    
+marvel.loc[:,"WikiLink_parsing"]=marvel.loc[:,"WikiLink"].astype(str)
+for i in marvel.loc[:,"WikiLink_parsing"]:
+    marvel["WikiLink_parsing"] = marvel["WikiLink_parsing"].replace([i],re.sub(' ', '_', i))
+
+
+
+### The function for data extraction
+
+import requests
+from pathlib import Path
+from urllib.parse import quote_plus
+
+def ExtractData(WikiLink, creator):
+    baseurl = "https://en.wikipedia.org/w/api.php?"
+    action = "action=query"
+    content = "prop=revisions&rvprop=content"
+    dataformat ="format=json"
+    tail = "rvslots=main"
+    for i in range(len(WikiLink)):
+        if WikiLink[i] != "nan":
+            link = WikiLink[i]
+            title = f"titles={link}"
+            query = f"{baseurl}{action}&{content}&{dataformat}&{title}&{tail}"
+            ## Downloading wiki-source
+            wikiresponse = requests.get(query)
+            wikidata = wikiresponse.text
+            ### Writing a file
+            if creator == 'marvel':
+                path = Path('/Users/aliaksandrdabranau/Documents/Jupiter Notebook/Social graphs and interactions/files/marvel_1/')
+                path.mkdir(parents=True, exist_ok=True)
+                file_name = f"{quote_plus(link)}.txt"
+                filepath = path / file_name
+                with filepath.open("w", encoding ="utf-8") as f:
+                    f.write(wikidata)
+            elif creator == 'dc':
+                path = Path('/Users/aliaksandrdabranau/Documents/Jupiter Notebook/Social graphs and interactions/files/dc_1/')
+                path.mkdir(parents=True, exist_ok=True)
+                file_name = f"{quote_plus(link)}.txt"
+                filepath = path / file_name
+                with filepath.open("w", encoding ="utf-8") as f:
+                    f.write(wikidata)
+            else:
+                print('Error: Set the correct value for the "creator" parameter – either "marvel" or "dc"!')
+                break
+
+
+### Extracting and downloading the files
+
+ExtractData(marvel.loc[:,"WikiLink_parsing"],creator="marvel")
+ExtractData(dc.loc[:,"WikiLink_parsing"],creator="dc")
