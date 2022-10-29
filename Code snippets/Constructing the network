@@ -1,0 +1,220 @@
+### Importing packages
+
+import matplotlib.pyplot as plt
+import random
+import numpy as np
+import pandas as pd
+import networkx as nx
+import urllib
+import re
+import os.path
+import requests
+from pathlib import Path
+from urllib.parse import quote_plus
+
+
+### Uploading .csv files
+
+dc = pd.read_csv('location/dc.csv', index_col=0)
+marvel = pd.read_csv('location/marvel.csv', index_col=0)
+
+
+### Pre-processing the data frames
+
+# I. Putting underscores
+
+dc.loc[:,"WikiLink_parsing"]=dc.loc[:,"WikiLink"].astype(str)
+marvel.loc[:,"WikiLink_parsing"]=marvel.loc[:,"WikiLink"].astype(str)
+
+for i in dc.loc[:,"WikiLink_parsing"]:
+    dc["WikiLink_parsing"] = dc["WikiLink_parsing"].replace([i],re.sub(' ', '_', i))
+    
+for i in marvel.loc[:,"WikiLink_parsing"]:
+    marvel["WikiLink_parsing"] = marvel["WikiLink_parsing"].replace([i],re.sub(' ', '_', i))
+
+# II. There are characters with the same name in Marvel and DC comics
+# How are we dealing with this?
+# 1) If a name has a link in DC dataset, we change this name to Name_DC and 
+# search (see the function below) based only on the link.
+# The same applies for Marvel characters.
+# If neither DC nor Marval have links, we put those characters in a special list
+
+dc['CharacterName_copy'] = dc['CharacterName']
+marvel['CharacterName_copy'] = marvel['CharacterName']
+
+dificult_case_characters = []
+for i in marvel["CharacterName"]:
+    for j in dc['CharacterName']:
+        if i==j:
+            f=list(dc['CharacterName']).index(j)
+            w=list(marvel['CharacterName']).index(i)
+            if dc["WikiLink_parsing"][f] == 'nan' and marvel["WikiLink_parsing"][w] == 'nan':
+                dificult_case_characters.append(dc['CharacterName'][f])
+            if marvel["WikiLink_parsing"][w] != 'nan':
+                marvel['CharacterName_copy'][w]=marvel['CharacterName_copy'][w]+"_Marvel"
+            if dc["WikiLink_parsing"][f] != 'nan':
+                dc['CharacterName_copy'][f]=dc['CharacterName_copy'][f]+"_DC"
+print(f"These characters' affiliation is difficult to identify {dificult_case_characters}")
+
+# III. One character in marvel, called Captain, can be confused with other characters that
+# contain the word 'Captain' inside.
+# For this reason, we change the name of this character and search for him based on the WikiLink only
+
+marvel['CharacterName_copy'][282]='Captain_Marvel'
+
+# IV. Fixing the issue with Man-Spider: there is no correct version of Spider-Man in the .csv files
+
+# 1) Delete the incorrect link near Man-Spider
+marvel["WikiLink_parsing"][1215] = 'nan'
+marvel["WikiLink"][1215] = 'nan'
+
+# 2) Change the name of Spider-Man (incorrect) to Spider-Man (Pavitr Prabhakar) (correct)
+marvel["CharacterName_copy"][1917] = 'Spider-Man (Pavitr Prabhakar)'
+
+# 3) Add a line to the data frame with 'Spider-Man' ~ 'Spider-Man'
+newest_dataframe = pd.DataFrame({'CharacterName': ['Spider-Man'], 'WikiLink': ['Spider-Man'], 
+                                 'WikiLink_parsing': ['Spider-Man'], 'CharacterName_copy': ['Spider-Man']})
+marvel=pd.concat([marvel, newest_dataframe], ignore_index = True, axis = 0)
+
+# V. Fixing the issue with Jackal (Jackal's popularity is 0, but he is getting confused with the highly popular Deathstroke),
+# because our data extraction algorithm downloads the whole wiki-pages but not specific paragraphs:
+# there is a tiny paragraph about Jackal on the page dedicated to Deathstroke
+
+dc['WikiLink_parsing'][368]='nan'
+dc['WikiLink'][368]='nan'
+
+
+### Functions for extracting connections
+
+# Sometimes, CharacterName and WikiLink are different, so first we check both of them present in the list of links,
+# second, we combine two corresponding arrays into one —
+# and we take the indices of the elements since this is the column in the dataframe 
+# that is common for both arrays —
+# third, we choose unique indices,
+# finally, we return the corresponding list of characters.
+
+
+marvel.loc[:,"WikiLink"]=marvel.loc[:,"WikiLink"].astype(str)
+dc.loc[:,"WikiLink"]=dc.loc[:,"WikiLink"].astype(str)
+
+def connections_marvel(links):
+    list1=[] ### contains indices of characters that don't have WikiLinks
+    for i in range(len(marvel["WikiLink"])):
+        if marvel["WikiLink"][i] == 'nan':
+            index = i
+            character_name = marvel["CharacterName_copy"][index]
+            u1=re.escape(str(character_name))
+            regex1 = r"^%s$" %u1
+            for link in links:
+                match = re.search(regex1, link)
+                if match:
+                    list1.append(list(marvel["CharacterName_copy"]).index(character_name))
+
+    list2=[] ### contains indices of characters that have WikiLinks
+    for k in range(len(marvel["WikiLink"])):
+        if marvel["WikiLink"][k] != 'nan':
+            wlink_raw=marvel["WikiLink"][k]
+            wlink_split=wlink_raw.split('|') ### sometimes, there is | in WikiLinks, so we need to get rid of it
+            for tiny_wlink in wlink_split:
+                u2=re.escape(str(tiny_wlink))
+                regex2 = r"^%s$" %u2
+                for link in links:
+                    new_link=link.split('|') ### there is | in some links retrieved from .txt files, too
+                    for x in new_link:
+                        match = re.search(regex2, x)
+                        if match:
+                            list2.append(list(marvel["WikiLink"]).index(wlink_raw))
+    auxiliary_list = list(np.unique(list1+list2))
+    connections_marv=[marvel["CharacterName_copy"][g] for g in auxiliary_list]
+    return(sorted(connections_marv))
+
+def connections_dc(links):
+    list1_dc=[] ### contains indices of characters that don't have WikiLinks
+    for i in range(len(dc["WikiLink"])):
+        if dc["WikiLink"][i] == 'nan':
+            index = i
+            character_name = dc["CharacterName_copy"][index]
+            u1=re.escape(str(character_name))
+            regex1 = r"^%s$" %u1
+            for link in links:
+                match = re.search(regex1, link)
+                if match:
+                    list1_dc.append(list(dc["CharacterName_copy"]).index(character_name))
+
+    list2_dc=[] ### contains indices of characters that have WikiLinks
+    for k in range(len(dc["WikiLink"])):
+        if dc["WikiLink"][k] != 'nan':
+            wlink_raw=dc["WikiLink"][k]
+            wlink_split=wlink_raw.split('|') ### sometimes, there is | in WikiLinks, so we need to get rid of it
+            for tiny_wlink in wlink_split:
+                u2=re.escape(str(tiny_wlink))
+                regex2 = r"^%s$" %u2
+                for link in links:
+                    new_link=link.split('|') ### there is | in some links retrieved from .txt files, too
+                    for x in new_link:
+                        match = re.search(regex2, x)
+                        if match:
+                            list2_dc.append(list(dc["WikiLink"]).index(wlink_raw))
+    auxiliary_list_dc = list(np.unique(list1_dc+list2_dc))
+    connections_dc=[dc["CharacterName_copy"][g] for g in auxiliary_list_dc]
+    return(sorted(connections_dc))
+    
+    
+    
+### Collecting outcoming links and connections
+
+# For Marvel
+
+ties_marvel=[]
+ties_dc=[]
+names_list=[]
+
+for i in marvel["WikiLink_parsing"]:
+    if i != 'nan':
+        partial_path ="/Users/aliaksandrdabranau/Documents/Jupiter Notebook/Social graphs and interactions/files/marvel_1/"
+        f = open(partial_path+quote_plus(i)+".txt", "r") ### We need to use quote_plus from urllib to access the file
+        ties = re.findall(r'\[\[(.*?)\]\]', f.read())
+        ties_marvel.append(connections_marvel(ties))
+        ties_dc.append(connections_dc(ties))
+        v = list(marvel["WikiLink_parsing"]).index(i)
+        names_list.append(marvel["CharacterName_copy"][v])
+
+# For DC
+
+dc_ties_marvel=[]
+dc_ties_dc=[]
+dc_names_list=[]
+
+for i in dc["WikiLink_parsing"]:
+    if i != 'nan':
+        partial_path ="/Users/aliaksandrdabranau/Documents/Jupiter Notebook/Social graphs and interactions/files/dc_1/"
+        f = open(partial_path+quote_plus(i)+".txt", "r") ### We need to use quote_plus from urllib to access the file
+        ties = re.findall(r'\[\[(.*?)\]\]', f.read())
+        dc_ties_marvel.append(connections_marvel(ties))
+        dc_ties_dc.append(connections_dc(ties))
+        v = list(dc["WikiLink_parsing"]).index(i)
+        dc_names_list.append(dc["CharacterName_copy"][v])
+        
+ 
+### Creating the network
+
+G = nx.DiGraph()
+
+for j in dc["CharacterName_copy"]:
+    G.add_node(j, universe='DC')
+
+for i in marvel["CharacterName_copy"]:
+    G.add_node(i, universe='Marvel')
+    if i in names_list:
+        ind = names_list.index(i)
+        for m in ties_marvel[ind]:
+            G.add_edge(i,m,universe_link='M-M')
+        for d in ties_dc[ind]:
+            G.add_edge(i,d,universe_link='M-D')
+
+for f in dc_names_list:
+    ind_dc=dc_names_list.index(f)
+    for ff in dc_ties_marvel[ind_dc]:
+        G.add_edge(f,ff,universe_link='D-M')
+    for gg in dc_ties_dc[ind_dc]:
+        G.add_edge(f,gg,universe_link='D-D')  
