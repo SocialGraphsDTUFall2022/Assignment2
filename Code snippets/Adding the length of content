@@ -1,0 +1,55 @@
+### Getting the texts from WikiPages
+### for each character that has a link
+### and returning the number of words (exculding non-main text: markup, links, etc.)
+
+### Writing the functions
+
+from bs4 import BeautifulSoup
+from nltk import word_tokenize
+
+def extract_plain_text_character(WikiLink):
+    text = []
+    match=re.search(r'\|', WikiLink) ### Some links have "|" inside, so we need to carefully avoid it
+    if match:
+        new_group = re.search(r'.+?(?=\|)', WikiLink)
+        new_link = new_group.group()
+        source = requests.get(f"https://en.wikipedia.org/wiki/{new_link}").text
+        soup = BeautifulSoup(source,'lxml')
+        for paragraph in soup.find_all('p'):
+            text.append(paragraph.text)
+    else:
+        source = requests.get(f"https://en.wikipedia.org/wiki/{WikiLink}").text
+        soup = BeautifulSoup(source,'lxml')
+        for paragraph in soup.find_all('p'):
+            text.append(paragraph.text)
+    return(text)
+
+def word_number(WikiLink):
+    wrd_nmbr=[]
+    if WikiLink != 'nan':
+        dummy_1 = extract_plain_text_character(WikiLink)
+        dummy_2 = []
+        for line in dummy_1:
+            dummy_2.append(line.strip()) ### removing /n at the end of each line
+        dummy_2_string = ''.join(dummy_2)
+        tkns = word_tokenize(dummy_2_string)
+        dummy_3 = [i for i in tkns if re.search(r'\w', i)]
+        wrd_nmbr=len(dummy_3)
+    else:
+        wrd_nmbr=0 ### for the nodes that don't have corresponding links
+    return(wrd_nmbr)
+   
+    
+### Getting the "length of the content" attribute attached
+
+universe_location = nx.get_node_attributes(G, "universe")
+
+for node in G.nodes():
+    if universe_location[node]=='Marvel':
+        index = list(marvel["CharacterName_copy"]).index(node)
+        content_length = word_number(marvel['WikiLink_parsing'][index])
+        G.nodes[node]['length_of_the_content']=content_length
+    elif universe_location[node]=='DC':
+        index_dc = list(dc["CharacterName_copy"]).index(node)
+        content_length_dc = word_number(dc['WikiLink_parsing'][index_dc])
+        G.nodes[node]['length_of_the_content']=content_length_dc
