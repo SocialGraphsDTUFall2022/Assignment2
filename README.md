@@ -4,3 +4,8 @@ The current repository contains supporting files for the Marvel & DC Supercharac
 - the wiki texts of all character pages.
 - the full directed network as an edge-list.
 - the full directed network in the pickle format.
+
+Creators:
+- s225404
+- s225500
+- s222424
